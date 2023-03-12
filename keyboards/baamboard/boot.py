@@ -1,8 +1,4 @@
-from enum import Enum
-from typing import List
-from core.hid import HID
 import usb_hid
-from core.keyboard.constants import KC
 
 
 REPORT_ID = 0x4
@@ -74,57 +70,19 @@ keyboard_descriptor = bytes(
     )
 )
 
+bitmap_keyboard = usb_hid.Device(
+    report_descriptor=keyboard_descriptor,
+    usage_page=0x1,
+    usage=0x6,
+    report_ids=(REPORT_ID,),
+    in_report_lengths=(REPORT_BYTES,),
+    out_report_lengths=(1,),
+)
 
-class USBHIDMode(Enum):
-    AUTO = 0
-    NORMAL = 1
-    NKRO = 2
-
-
-class USB(HID):
-    def __init__(self, device: usb_hid.Device, try_nkro: bool = True):
-        self.device = device
-        self.nkroable = False
-        self.mode = USBHIDMode.NORMAL
-        device = usb_hid.Device(
-            report_descriptor=keyboard_descriptor,
-            usage_page=0x1,
-            usage=0x6,
-            report_ids=(REPORT_ID,),
-            in_report_lengths=(REPORT_BYTES,),
-            out_report_lengths=(1,),
-        )
-
-    async def connect(self):
-        usb_hid.enable(
-            (
-                self.device,
-                usb_hid.Device.MOUSE,
-                usb_hid.Device.CONSUMER_CONTROL,
-            )
-        )
-
-    async def disconnect(self):
-        usb_hid.disable()
-
-    async def try_nkro(self):
-        try:
-            report = bytearray(16)
-            await self.send_report(report)
-            self.mode = USBHIDMode.NKRO
-            return True
-        except ValueError:
-            return False
-
-    async def send_report(self, report: bytearray):
-        report_modifier = memoryview(report)[0:1]
-        report_keys = memoryview(report)[1:]
-        self.device.send_report(report)
-
-    async def clear(self) -> None:
-        if self.mode == USBHIDMode.NKRO:
-            report = bytearray(b"0x0000") * 8
-            await self.send_report(report)
-        elif self.mode == USBHIDMode.NORMAL:
-            report = bytearray(b"0x00") * 8
-            await self.send_report(report)
+usb_hid.enable(
+    (
+        bitmap_keyboard,
+        usb_hid.Device.MOUSE,
+        usb_hid.Device.CONSUMER_CONTROL,
+    )
+)

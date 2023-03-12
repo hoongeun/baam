@@ -23,3 +23,17 @@ class HID(ABC):
     @abstractmethod
     async def disconnect(self):
         pass
+
+
+class ReportBuilder(ABC):
+    @abstractmethod
+    def build(self):
+        pass
+
+    @abstractmethod
+    def set_modifier(self):
+        pass
+
+    @abstractmethod
+    def set_normal(self):
+        pass
