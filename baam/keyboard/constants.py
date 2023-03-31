@@ -371,10 +371,10 @@ class KC(Enum):
 
 
 def is_modifier(keycode: KC) -> bool:
-    return KC.LCTL.value() <= keycode.value() <= KC.RIGHT_GUI.value()
+    return KC.LCTL <= keycode.value() <= KC.RIGHT_GUI
 
 
 def modifier_bit(keycode: KC) -> int:
     """Return the modifer bit to be set in an HID keycode report if this is a
     modifier key; otherwise return 0."""
-    return 1 << (keycode.value() - KC.LCTL.value()) if is_modifer(keycode) else 0
+    return 1 << (keycode.value() - KC.LCTL) if is_modifier(keycode) else 0

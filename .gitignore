@@ -1,3 +1,6 @@
+/.idea
+/micropython
+
 # Created by https://www.toptal.com/developers/gitignore/api/pycharm,visualstudiocode,windows,linux,macos,vim,emacs
 # Edit at https://www.toptal.com/developers/gitignore?templates=pycharm,visualstudiocode,windows,linux,macos,vim,emacs
 
@@ -73,7 +76,8 @@ flycheck_*.el
 .LSOverride
 
 # Icon must end with two \r
-Icon
+Icon
+
 
 # Thumbnails
 ._*

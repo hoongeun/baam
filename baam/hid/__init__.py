@@ -1,3 +1,3 @@
-from .hid import HID
+from .hid import HID, ReportBuilder
 from .usb import USB
-from .ble import Bluetooth
+from .bluetooth import Bluetooth

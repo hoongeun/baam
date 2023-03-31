@@ -1,21 +1,16 @@
-from enum import Enum
-from micropython import const
+import asyncio
 from typing import List, Tuple, Dict, Optional, Callable, Set
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from baam.hid.hid import HID
-from baam.keyboard.constants import KC, _______
-from baam.keyboard.matrix import KeyMatrix, is_modifier
+from baam.hid.bluetooth import Bluetooth, BLEReportBuilder
+from baam.hid.usb import USB, USBReportBuilder
+from baam.keyboard.constants import KC, _______, is_modifier
+from baam.keyboard.matrix import KeyMatrix
 from baam.keyboard.layer import KeyLayer
 
 
-class KeyEventType(Enum):
-    Unknown = const(0)
-    Press = const(1)
-    Release = const(2)
-
-
-KeyEvent = Tuple[KC, bool, bool, bool, bool, bool, bool, bool]
-KeyEventHandler = Callable[KeyEvent, None]
+KeyEvent = Tuple[KC, Set[KC]]
+KeyEventHandler = Callable[[KeyEvent], None]
 
 
 def is_valid_matrix(layer: KeyLayer, key_matrix: KeyMatrix) -> bool:
@@ -26,7 +21,7 @@ async def get_keycode(layer: KeyLayer, matrix: KeyMatrix) -> Tuple[Set[KC], Set[
     hardware: Set[KC] = set()  # reserved keycodes like firmware upgrade, restart
     normals: Set[KC] = set()
     modifiers: Set[KC] = set()
-    coords = await matrix.scan()
+    coords = matrix.scan()
     for kc in map(lambda coord: layer.get_keycode(coord), coords):
         modifiers.add(kc) if is_modifier(kc.value()) else normals.add(kc)
     return normals, modifiers, hardware
@@ -34,51 +29,54 @@ async def get_keycode(layer: KeyLayer, matrix: KeyMatrix) -> Tuple[Set[KC], Set[
 
 @dataclass
 class KeyState:
-    norm: Set[KC] = set()
-    mod: Set[KC] = set()
-    hw: Set[KC] = set()
+    norm: Set[KC] = field(default_factory=set)
+    mod: Set[KC] = field(default_factory=set)
+    hw: Set[KC] = field(default_factory=set)
 
 
 class Keyboard:
-    def __init__(self, matrix: KeyMatrix, layers: Dict[str, KeyLayer] = {}, ble: Optional[HID]=None, usb: Optional[HID]=None) -> None:
+    def __init__(self, matrix: KeyMatrix, layers: Optional[Dict[str, KeyLayer]]=None, ble: Optional[HID]=None, usb: Optional[HID]=None) -> None:
         self.matrix: KeyMatrix = matrix
         self.ble: Optional[HID] = ble
         self.usb: Optional[HID] = usb
-        self.key_press_handlers: List[KeyEventHandler] = []
-        self.key_release_handlers: List[KeyEventHandler] = []
-        self.layers: Dict[str, KeyLayer] = layers
-        self.current_layer = layers["default"]
+        self.key_down_handlers: List[KeyEventHandler] = []
+        self.key_up_handlers: List[KeyEventHandler] = []
+        self.layers: Dict[str, KeyLayer] = {} if layers is None else layers
+        self.current_layer = self.layers.get("default")
         self.active_hid: Optional[HID] = None
         self.key_state = KeyState()
+        self.is_running = False
 
-    def on_key_press(self, event: KeyEvent):
-        for handler in self.key_press_handlers:
-            handler(*event)
-
-    def on_key_release(self, event: KeyEvent):
-        for handler in self.key_release_handlers:
-            handler(*event)
-
-    def send_string(self, string_to_send: str):
-        pass
-
-    async def start(self):
-        while True:
+    def start(self):
+        self.is_running = True
+        while self.is_running:
             norm_kc, mod_kc, hw_kc = await get_keycode(self.current_layer, self.matrix)
-            if len(hw_kc) > 0:
-                raise NotImplementedError("hardware keycode isn't implemented")
-            key_down, pressing, key_up = self.change_state(KeyState(norm_kc, mod_kc, hw_kc))
+            await asyncio.gather([self.send_keys(norm_kc, mod_kc), self.handle_events(norm_kc, mod_kc, hw_kc)])
+            self.key_state = KeyState(norm_kc, mod_kc, hw_kc)
 
-            if ev is not None:
-                if ev.pressed:
-                    kbd.press(key)
-                else:
-                    kbd.release(key)
-            else
+    def stop(self):
+        self.is_running = False
 
-            self.on_key_event
+    async def send_keys(self, norm_keys: Set[KC], mod_keys: Set[KC]):
+        if isinstance(self.active_hid, USB):
+            report = USBReportBuilder().set_normals(norm_keys).set_modifier(mod_keys).build()
+            await self.active_hid.send_report(report)
+        elif isinstance(self.active_hid, Bluetooth):
+            report = BLEReportBuilder().set_normals(norm_keys).set_modifier(mod_keys).build()
+            await self.active_hid.send_report(report)
+        else:
+            ValueError(f"failed to send keys, {self.active_hid}, {norm_keys}")
 
-    def change_state(self, new_state: KeyState) -> Tuple[Tuple[Set[KC], Set[KC], Set[KC]], Tuple[Set[KC], Set[KC], Set[KC]], Tuple[Set[KC], Set[KC], Set[KC]]]:
+    async def handle_events(self, norm_kc: Set[KC], mod_kc: Set[KC], hw_kc: Set[KC]):
+        key_down, pressing, key_up = self.diff_state(KeyState(norm_kc, mod_kc, hw_kc))
+        for key in key_down[0].union(pressing[0]):
+            for handler in self.key_down_handlers:
+                handler((key, mod_kc))
+        for key in key_up[0]:
+            for handler in self.key_up_handlers:
+                handler((key, mod_kc))
+
+    def diff_state(self, new_state: KeyState) -> Tuple[Tuple[Set[KC], Set[KC], Set[KC]], Tuple[Set[KC], Set[KC], Set[KC]], Tuple[Set[KC], Set[KC], Set[KC]]]:
         norm_key_up = self.key_state.norm.difference(new_state.norm)
         norm_key_down = new_state.norm.difference(self.key_state.norm)
         norm_pressing = new_state.norm.intersection(self.key_state.norm)
@@ -88,7 +86,4 @@ class Keyboard:
         hw_key_up = self.key_state.norm.difference(new_state.hw)
         hw_key_down = new_state.hw.difference(self.key_state.hw)
         hw_pressing = new_state.hw.intersection(self.key_state.hw)
-        self.key_state = new_state
         return (norm_key_down, mod_key_down, hw_key_down), (norm_pressing, mod_pressing, hw_pressing), (norm_key_up, mod_key_up, hw_key_up)
-
-
